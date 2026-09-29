@@ -1,0 +1,24 @@
+# DHI attribute rubric — transcribed from the rating table (spec §4.4). Cue ids are what
+# the VLM must cite. Levels use the ordinal code of dhi_gpc.RATING_ORDER (Q=1 .. T=5).
+version: 1
+attributes:
+  lateral_amplitude_contrast:
+    guideline: >
+      Lateral Amplitude Contrast is comparing the peak of the histograms from the wet and
+      hydrocarbon legs to see how much overlap exists. Compare ONLY the HC and wet legs from
+      the anomaly. Lateral Amplitude Contrast and Anomaly Strength are often conflated; anomaly
+      strength compares the anomaly to its surroundings, lateral contrast does not.
+    illustration: rubric/lateral_amplitude_contrast_levels.png
+    notes:
+      colours: "In the illustration blue is the WET leg and green is the HC leg."
+      direction: >
+        Expected direction: the hydrocarbon leg is MORE NEGATIVE on the fluid-volume minimum
+        amplitude (its peak sits to the LEFT of the wet peak). A clear separation the wrong way
+        is level 1, not a weak level 2.
+      split: "HC leg = container points at or above the proposed contact elevation; wet leg = below it."
+    levels:
+      1: {letter: Q, cue: LAC-Q, text: "Clear difference between interpreted hydrocarbon leg and down dip water leg equivalent, which is inconsistent with expectations for hydrocarbon."}
+      2: {letter: W, cue: LAC-W, text: "Hydrocarbon leg is mostly similar to down dip water leg equivalent with extensive overlap, or no down dip wet leg identified."}
+      3: {letter: E, cue: LAC-E, text: "Hydrocarbon and wet legs have similar distributions but the hydrocarbon leg is slightly more distinct in the expected direction."}
+      4: {letter: R, cue: LAC-R, text: "Clear difference between anomaly and down dip water leg equivalent with some overlap."}
+      5: {letter: T, cue: LAC-T, text: "Clear difference between anomaly and down dip water leg equivalent with minimal overlap."}
