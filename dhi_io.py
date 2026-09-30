@@ -83,30 +83,23 @@ def read_container_polygon(shp_path):
         pts = shp.points
         parts = list(shp.parts) + [len(pts)]
         rings = [pts[parts[i]:parts[i + 1]] for i in range(len(parts) - 1)]
-        outers, holes = [], []
-        ring_idx_map = {}  # map ring index in rings to its position in outers or holes
+        outers, holes = [], []                       # (ring index, ring)
         for ring_idx, ring in enumerate(rings):
-            if shapefile.signed_area(ring) < 0:
-                outers.append(ring)
-                ring_idx_map[ring_idx] = ('outer', len(outers) - 1)
-            else:
-                holes.append(ring)
-                ring_idx_map[ring_idx] = ('hole', len(holes) - 1)
-        # Check that every hole is contained by at least one outer
-        for hole_idx, hole in enumerate(holes):
-            hole_contained = any(Polygon(outer).contains(Polygon(hole)) for outer in outers)
-            if not hole_contained:
-                # Find the original ring index (the hole ring is the ring_idx-th ring overall)
-                # We need to find which original ring_idx corresponds to this hole
-                original_ring_idx = None
-                for orig_idx, (ring_type, idx) in ring_idx_map.items():
-                    if ring_type == 'hole' and idx == hole_idx:
-                        original_ring_idx = orig_idx
-                        break
-                raise ValueError(f"{shp_path}: ring {original_ring_idx} is counter-clockwise but lies inside no outer ring")
-        for outer in outers:
-            poly = Polygon(outer, [h for h in holes if Polygon(outer).contains(Polygon(h))])
-            polys.append(poly)
+            (outers if shapefile.signed_area(ring) < 0 else holes).append((ring_idx, ring))
+        shells = [Polygon(ring) for _, ring in outers]
+        hole_lists = [[] for _ in shells]
+        for ring_idx, hole in holes:
+            hp = Polygon(hole)
+            parents = [k for k, shell in enumerate(shells) if shell.contains(hp)]
+            if not parents:
+                raise ValueError(f"{shp_path}: ring {ring_idx} is counter-clockwise but lies inside no outer ring")
+            # An island inside a hole is itself an outer ring, so a hole can lie inside several
+            # shells. It belongs to its IMMEDIATE parent only (the smallest containing shell):
+            # attaching it to every enclosing shell nests a hole inside that shell's own hole,
+            # the geometry is invalid and point-in-polygon silently includes the excluded area.
+            hole_lists[min(parents, key=lambda k: shells[k].area)].append(hole)
+        for (_, outer), hl in zip(outers, hole_lists):
+            polys.append(Polygon(outer, hl))
     if not polys:
         raise ValueError(f"{shp_path}: no polygon rings")
     return polys[0] if len(polys) == 1 else MultiPolygon(polys)

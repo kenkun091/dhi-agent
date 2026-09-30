@@ -142,7 +142,7 @@ def cv_rater_c(rows, meas, folds, rater, rubric, panels, rung="L1", k_ex=4, n_sp
     y = np.array([r["level"] for r in rows])
     override = np.array([x["level_override"] or 0 for x in meas])
     probs_acc, cnt = _accumulate(len(rows))
-    audits, agreements = {}, {}
+    audits, agreements, abstained = {}, {}, {}
     attr = rubric["attributes"]["lateral_amplitude_contrast"]
     for rep, f, tr, te in folds:
         pool = [dict(prospect_id=rows[i]["prospect_id"], sAUC=meas[i]["sAUC"], level=int(y[i]),
@@ -170,21 +170,33 @@ def cv_rater_c(rows, meas, folds, rater, rubric, panels, rung="L1", k_ex=4, n_sp
             # is the leakage backstop -- if a test-fold id ever appears here, fail loud
             # rather than silently score against evidence the model was tested on
             assert not ({e["prospect_id"] for e in ex} & test_ids), "exemplar leakage from the test fold"
-            results = [rater.rate(pid, [panels[pid][0]], report, ex, rubric, temperature=None, tag=f"r{rep}")]
+            tags = [f"r{rep}"] + [f"r{rep}s{s}" for s in range(n_spread)]
+            results = [rater.rate(pid, [panels[pid][0]], report, ex, rubric, temperature=None, tag=tags[0])]
             for s in range(n_spread):
                 ex_s = list(ex); random.Random(s).shuffle(ex_s)       # reshuffled exemplar order per sample
                 results.append(rater.rate(pid, [panels[pid][(s + 1) % 2]], report, ex_s, rubric,
-                                          temperature=None, tag=f"r{rep}s{s}"))
+                                          temperature=None, tag=tags[s + 1]))
             sc = self_consistency(results)
-            probs_acc[i] += np.array(sc["mean_probs"]); cnt[i] += 1
+            if sc["n_abstain"]:
+                abstained[pid] = abstained.get(pid, 0) + sc["n_abstain"]
+            if sc["mean_probs"] is not None:
+                # every sample abstained -> no evidence: leave the prospect unscored so that
+                # _finalize scores it uniform and says so, instead of averaging in a guess
+                probs_acc[i] += np.array(sc["mean_probs"]); cnt[i] += 1
             agreements[pid] = sc["agreement"]
             if attr.get("levels"):
-                audits[pid] = audit_rationale(results[0], report or "", attr)
+                # spec §7.4: the audit runs on 100 % of ratings -- every response that fed
+                # mean_probs, not only the canonical one; each issue names its sample tag
+                audits[pid] = [f"{t}: {msg}" for t, res in zip(tags, results)
+                               for msg in audit_rationale(res, report or "", attr)]
+    if abstained:
+        print(f"rater C: {sum(abstained.values())} abstaining responses on {len(abstained)} prospects "
+              f"(dropped from the average, counted against agreement)")
     probs, level = _finalize(probs_acc, cnt, override, "rater C")
     n_bad = sum(1 for v in audits.values() if v)
     return dict(oof_level=level.tolist(), oof_probs=probs.tolist(), metrics=summary(y, level, probs),
                 prospect_id=[r["prospect_id"] for r in rows], audit_failures=n_bad, audits=audits,
-                agreement=agreements)
+                agreement=agreements, abstentions=abstained)
 
 
 def stack(rows, meas, folds, vlm_probs, **model_kw):
@@ -202,6 +214,8 @@ def stack(rows, meas, folds, vlm_probs, **model_kw):
     probs_acc, cnt = _accumulate(len(rows))
     for rep, f, tr, te in folds:
         tr = tr[usable[tr]]; te_u = te[usable[te]]
+        if not len(te_u):
+            continue     # nothing scorable in this fold (e.g. a held-out survey that is all overrides)
         m = OrdinalModel(**model_kw).fit(X[tr], y[tr], [g[i] for i in tr])
         probs_acc[te_u] += m.predict_proba(X[te_u], [g[i] for i in te_u]); cnt[te_u] += 1
     probs, level = _finalize(probs_acc, cnt, override, "stack")

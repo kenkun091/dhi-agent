@@ -124,9 +124,13 @@ def load_prospects(path="prospects.csv"):
     for r in rows:
         r["level"] = int(r["level"]) if r["level"] else None
         r["s_dir"] = int(r["s_dir"])
-        # An error-status row can carry a blank or unparseable z_contact (that's WHY it's
-        # error) -- a bad single row must not crash the load of the whole file.
-        r["z_contact"] = float(r["z_contact"]) if r["z_contact"] not in ("", None, "nan") else float("nan")
+        # An error-status row can carry a blank or unparseable z_contact ("", "nan", "unknown",
+        # "TBD" ... -- that's WHY it's error). A bad single row must not crash the load of the
+        # whole file, so anything float() rejects becomes NaN here rather than a ValueError.
+        try:
+            r["z_contact"] = float(r["z_contact"])
+        except (TypeError, ValueError):
+            r["z_contact"] = float("nan")
         r["issues"] = [s for s in r["issues"].split("; ") if s]
     return rows
 

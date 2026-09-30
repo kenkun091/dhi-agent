@@ -50,6 +50,20 @@ def _leg_density(leg, h, grid):
     return gaussian_kde(leg, bw_method=h / s)(grid)
 
 
+def _ovl_grid(pooled, h, pad=4.0, step=0.125):
+    """Integration grid for the overlap: spacing h*step, but ONLY where data lie -- windows of
+    +-pad*h around the sorted values, merged where they touch. A fixed 512-point grid over the
+    whole range under-samples the KDE peaks as soon as one outlier stretches the range to
+    hundreds of bandwidths (identical legs then read OVL ~ 0); windows keep the resolution
+    tied to h at a cost that follows the data, not the range. Returns the segments separately
+    because a trapezoid spanning an empty gap would credit it with edge density x gap width."""
+    v = np.unique(pooled)
+    breaks = np.where(np.diff(v) > 2 * pad * h)[0]
+    starts = np.r_[v[0], v[breaks + 1]] - pad * h
+    ends = np.r_[v[breaks], v[-1]] + pad * h
+    return [np.linspace(a, b, int(np.ceil((b - a) / (h * step))) + 1) for a, b in zip(starts, ends)]
+
+
 def separation_stats(b_hc, b_wet):
     b_hc = np.asarray(b_hc, dtype=np.float64); b_wet = np.asarray(b_wet, dtype=np.float64)
     n1, n2 = len(b_hc), len(b_wet)
@@ -65,11 +79,14 @@ def separation_stats(b_hc, b_wet):
     if scale == 0:                    # >half the pooled values tied: MAD collapses, fall back
         scale = pooled_std
     h = _shared_bandwidth(pooled)
-    # 4h beyond the data range keeps the KDE tails (and a point-mass leg's spread) on the grid
-    grid = np.linspace(pooled.min() - 4 * h, pooled.max() + 4 * h, 512)
+    segs = _ovl_grid(pooled, h)                # pad 4h keeps KDE tails and point-mass legs on the grid
+    grid = np.concatenate(segs)                # ascending overall: segments are disjoint and ordered
     f_hc = _leg_density(b_hc, h, grid)
     f_wet = _leg_density(b_wet, h, grid)
-    ovl = float(np.clip(np.trapz(np.minimum(f_hc, f_wet), grid), 0.0, 1.0))
+    both = np.minimum(f_hc, f_wet)
+    bounds = np.cumsum([0] + [len(g) for g in segs])
+    ovl = sum(np.trapz(both[a:b], grid[a:b]) for a, b in zip(bounds[:-1], bounds[1:]))
+    ovl = float(np.clip(ovl, 0.0, 1.0))
     d_mode = (grid[np.argmax(f_hc)] - grid[np.argmax(f_wet)]) / scale
     d_med = (np.median(b_hc) - np.median(b_wet)) / scale
     return dict(sAUC=sauc, OVL=ovl, d_mode=float(d_mode),

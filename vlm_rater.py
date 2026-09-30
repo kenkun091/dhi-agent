@@ -172,10 +172,19 @@ def select_exemplars(query_sauc, pool, k=4, prefer_other_survey=None):
 
 
 def self_consistency(results):
-    levels = np.array([r["level"] for r in results])
+    """Mode, agreement and mean probabilities over the point + spread responses (spec §5.2.4).
+    A response flagged `abstain` carries no level evidence -- the prompt tells the model to
+    abstain rather than guess -- so it is dropped from the mode and the mean; it still counts
+    AGAINST agreement, because an abstention is a vote the others did not get. When every
+    response abstains there is no evidence at all: mean_probs is None, never a made-up level."""
+    kept = [r for r in results if "abstain" not in (r.get("flags") or [])]
+    n_abstain = len(results) - len(kept)
+    if not kept:
+        return dict(level_mode=None, agreement=0.0, mean_probs=None, n_abstain=n_abstain)
+    levels = np.array([r["level"] for r in kept])
     mode = int(np.bincount(levels).argmax())
-    return dict(level_mode=mode, agreement=float(np.mean(levels == mode)),
-                mean_probs=np.mean([r["probs"] for r in results], axis=0).tolist())
+    return dict(level_mode=mode, agreement=float(np.sum(levels == mode) / len(results)),
+                mean_probs=np.mean([r["probs"] for r in kept], axis=0).tolist(), n_abstain=n_abstain)
 
 
 def audit_rationale(result, report_text, attr):
